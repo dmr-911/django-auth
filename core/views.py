@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .serializers import UserSerializer
 from .models import User
+import pyotp
 from .authentication import (
     create_access_token,
     create_refresh_token,
@@ -43,25 +44,19 @@ class LoginAPIView(APIView):
         if not user.check_password(password):
             raise exceptions.AuthenticationFailed("Invalid password")
 
-        access_token = create_access_token(user.id)
-        refresh_token = create_refresh_token(user.id)
+        if user.tfa_secret:
+            return Response({"id": user.id})
 
-        UserToken.objects.create(
-            user_id=user.id,
-            token=refresh_token,
-            expired_at=datetime.datetime.utcnow() + datetime.timedelta(days=7),
+        secret = pyotp.random_base32()
+        otpauth_url = pyotp.TOTP(secret).provisioning_uri(issuer_name="My App")
+
+        return Response(
+            {
+                "id": user.id,
+                "secret": secret,
+                "otpauth_url": otpauth_url,
+            }
         )
-
-        response = Response()
-
-        response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
-        response.data = {"token": access_token}
-
-        # return Response(UserSerializer(user).data)
-        serializer = UserSerializer(user)
-        # return Response(serializer.data)
-
-        return response
 
 
 class UserAPIView(APIView):
@@ -89,7 +84,7 @@ class UserAPIView(APIView):
 
 
 class RefreshAPIView(APIView):
-    def post(self, request):
+    def post(self, request):  # sourcery skip: avoid-builtin-shadow
         refresh_token = request.COOKIES.get("refresh_token")
         id = decode_refresh_token(refresh_token)
 
@@ -159,3 +154,37 @@ class ResetAPIView(APIView):
         user.set_password(data["password"])
         user.save()
         return Response({"message": "Password reset successfully!"})
+
+
+class TwoFactorLoginAPIView(APIView):
+    def post(self, request):  # sourcery skip: avoid-builtin-shadow
+        id = request.data["id"]
+        user = User.objects.filter(pk=id).first()
+
+        if not user:
+            raise exceptions.AuthenticationFailed("User not found")
+
+        secret = user.tfa_secret if user.tfa_secret != "" else request.data["secret"]
+        if not pyotp.TOTP(secret).verify(request.data["code"]):
+            raise exceptions.AuthenticationFailed("Invalid OTP")
+
+        if user.tfa_secret == '':
+            user.tfa_secret = secret
+            user.save()
+
+        access_token = create_access_token(id)
+        refresh_token = create_refresh_token(id)
+
+        UserToken.objects.create(
+            user_id=id,
+            token=refresh_token,
+            expired_at=datetime.datetime.now(datetime.timezone.utc)
+            + datetime.timedelta(days=7),
+        )
+
+        response = Response()
+
+        response.set_cookie(key="refresh_token", value=refresh_token, httponly=True)
+        response.data = {"token": access_token}
+
+        return response

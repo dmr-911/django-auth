@@ -9,14 +9,15 @@ class User(AbstractUser):
     email = models.CharField(max_length=255, unique=True)
     password = models.CharField(max_length=255)
     username = None
-
-    USERNAME_FIELD = 'email'
+    tfa_secret = models.CharField(max_length=255, default="")
+    USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
 
 
 class NewUser(User):
     phone_number = models.CharField(max_length=255, unique=True)
-    
+
+
 class UserToken(models.Model):
     user_id = models.IntegerField()
     token = models.CharField(max_length=255)
