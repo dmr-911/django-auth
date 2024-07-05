@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.core.mail import send_mail
 from rest_framework import exceptions
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -12,8 +13,10 @@ from .authentication import (
     JWTAuthentication,
     decode_refresh_token,
 )
-from .models import UserToken
+from .models import UserToken, Reset
 import datetime
+import string
+import random
 
 
 # Create your views here.
@@ -112,3 +115,28 @@ class LogoutAPIView(APIView):
         response.data = {"message": "Successfully logged out"}
 
         return response
+
+
+class ResetAPIView(APIView):
+    def post(self, request):
+        token = "".join(
+            random.choice(string.ascii_lowercase + string.digits) for _ in range(18)
+        )
+
+        Reset.objects.create(email=request.data["email"], token=token)
+
+        url = f"http://localhost:3000/reset{token}"
+
+        send_mail(
+            subject="Reset your password",
+            message="Your password has been reset",
+            from_email="your_email@example.com",
+            recipient_list=[request.data["email"]],
+            html_message=f'<p>To reset your password, click <a href="http://localhost:8000/reset/{token}">here</a></p>',
+        )
+
+        return Response(
+            {
+                "message": "Successfully reset",
+            }
+        )
