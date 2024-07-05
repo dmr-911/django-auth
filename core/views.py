@@ -1,15 +1,12 @@
-from django.shortcuts import render
 from django.core.mail import send_mail
 from rest_framework import exceptions
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.authentication import get_authorization_header
 from .serializers import UserSerializer
 from .models import User
 from .authentication import (
     create_access_token,
     create_refresh_token,
-    decode_token,
     JWTAuthentication,
     decode_refresh_token,
 )
@@ -117,7 +114,7 @@ class LogoutAPIView(APIView):
         return response
 
 
-class ResetAPIView(APIView):
+class ForgotAPIView(APIView):
     def post(self, request):
         token = "".join(
             random.choice(string.ascii_lowercase + string.digits) for _ in range(18)
@@ -140,3 +137,25 @@ class ResetAPIView(APIView):
                 "message": "Successfully reset",
             }
         )
+
+
+class ResetAPIView(APIView):
+    def post(self, request):
+        data = request.data
+
+        if data["password"] != data["password_confirm"]:
+            raise exceptions.APIException("Password do not match")
+
+        reset_password = Reset.objects.filter(token=data["token"]).first()
+
+        if reset_password:
+            raise exceptions.APIException("Invalid link!")
+
+        user = User.objects.filter(email=reset_password.email).first()
+
+        if not user:
+            raise exceptions.APIException("User not found!")
+
+        user.set_password(data["password"])
+        user.save()
+        return Response({"message": "Password reset successfully!"})
